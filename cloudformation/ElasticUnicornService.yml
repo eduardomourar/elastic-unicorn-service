@@ -43,35 +43,33 @@ Resources:
             },
           }
 
-          def describe_unicorns(request):
+          def describe_unicorns():
             return {
               "Unicorns": [unicorn for unicorn in DATABASE.values()]
             }
 
-          def get_unicorn(request):
-            if request['UnicornId'] not in DATABASE:
+          def get_unicorn(unicorn_id):
+            if unicorn_id not in DATABASE:
               raise ValueError("Unicorn not found.")
 
             return {
-              "Unicorn": DATABASE[request['UnicornId']],
+              "Unicorn": DATABASE[unicorn_id],
             }
-
-          FUNC_MAP = {
-            "GetUnicorn": get_unicorn,
-            "DescribeUnicorns": describe_unicorns,
-          }
 
           def handler(event, context):
             request = json.loads(event['body'] or "{}")
-            func_name = event['pathParameters']['proxy']
-            func = FUNC_MAP[func_name]
+            path_parameters = event['pathParameters']
             try:
+              if path_parameters is None:
+                body = describe_unicorns()
+              else:
+                body = get_unicorn(path_parameters['proxy'])
               return {
                 "statusCode": 200,
                 "headers": {
                   "Content-Type": "application/json",
                 },
-                "body": json.dumps(func(request)),
+                "body": json.dumps(body),
               }
             except ValueError as err:
               return {
@@ -101,35 +99,78 @@ Resources:
       Name: !Sub ElasticUnicornService-${AWS::Region}
       EndpointConfiguration:
         Types:
-        - EDGE
-      Parameters:
-        endpointConfigurationTypes: EDGE
-      Policy: !Sub >-
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": "*",
-              "Action": "execute-api:Invoke",
-              "Resource": "arn:aws:execute-api:eu-west-1:${AWS::AccountId}:*/*/*/*"
-            }
-          ]
-        }
+          - REGIONAL
+      Policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: execute-api:Invoke
+            Principal: '*'
+            Resource:
+              - 'execute-api:/api/GET/unicorn'
+              - 'execute-api:/api/*/unicorn/*'
+          # - Effect: Allow
+          #   Action: execute-api:Invoke
+          #   Principal:
+          #     AWS:
+          #       - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          #   Resource:
+          #     - 'execute-api:/api/*/details/unicorn/*'
 
-  RestApiRoot:
+  UnicornListRoot:
     Type: AWS::ApiGateway::Resource
     Properties:
       RestApiId: !Ref RestApi
       ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: 'unicorn'
+
+  UnicornListProxy:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref UnicornListRoot
       PathPart: '{proxy+}'
 
-  RestApiRootANY:
+  UnicornDetailsRoot:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: 'details'
+
+  UnicornDetails:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref UnicornDetailsRoot
+      PathPart: 'unicorn'
+
+  UnicornDetailsProxy:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref UnicornDetails
+      PathPart: '{proxy+}'
+
+  RestApiListANY:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref UnicornListProxy
+      HttpMethod: ANY
+      RequestParameters: {}
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Function.Arn}/invocations
+        
+  RestApiDetailsANY:
     Type: AWS::ApiGateway::Method
     Properties:
       AuthorizationType: AWS_IAM
       RestApiId: !Ref RestApi
-      ResourceId: !Ref RestApiRoot
+      ResourceId: !Ref UnicornDetailsProxy
       HttpMethod: ANY
       RequestParameters: {}
       Integration:
@@ -138,7 +179,9 @@ Resources:
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Function.Arn}/invocations
 
   RestApiDeployment:
-    DependsOn: RestApiRootANY
+    DependsOn:
+      - RestApiListANY
+      - RestApiDetailsANY      
     Type: AWS::ApiGateway::Deployment
     Properties:
       RestApiId: !Ref RestApi
@@ -148,7 +191,7 @@ Resources:
     Properties:
       DeploymentId: !Ref RestApiDeployment
       RestApiId: !Ref RestApi
-      StageName: Prod
+      StageName: api
 
 Outputs:
 
