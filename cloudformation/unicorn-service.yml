@@ -103,19 +103,21 @@ Resources:
       Policy:
         Version: 2012-10-17
         Statement:
-          - Effect: Allow
+          - Sid: AllowAnonymous
+            Effect: Allow
             Action: execute-api:Invoke
             Principal: '*'
             Resource:
               - 'execute-api:/api/GET/unicorn'
               - 'execute-api:/api/*/unicorn/*'
-          # - Effect: Allow
-          #   Action: execute-api:Invoke
-          #   Principal:
-          #     AWS:
-          #       - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-          #   Resource:
-          #     - 'execute-api:/api/*/details/unicorn/*'
+          - Sid: AllowIamAuth
+            Effect: Allow
+            Action: execute-api:Invoke
+            Principal:
+              AWS:
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Resource:
+              - 'execute-api:/api/*/details/unicorn/*'
 
   UnicornListRoot:
     Type: AWS::ApiGateway::Resource
@@ -152,7 +154,20 @@ Resources:
       ParentId: !Ref UnicornDetails
       PathPart: '{proxy+}'
 
-  RestApiListANY:
+  RestApiListRootANY:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref UnicornListRoot
+      HttpMethod: ANY
+      RequestParameters: {}
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Function.Arn}/invocations
+
+  RestApiListProxyANY:
     Type: AWS::ApiGateway::Method
     Properties:
       AuthorizationType: NONE
@@ -164,7 +179,7 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Function.Arn}/invocations
-        
+
   RestApiDetailsANY:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -180,7 +195,8 @@ Resources:
 
   RestApiDeployment:
     DependsOn:
-      - RestApiListANY
+      - RestApiListRootANY
+      - RestApiListProxyANY
       - RestApiDetailsANY      
     Type: AWS::ApiGateway::Deployment
     Properties:
